@@ -163,6 +163,7 @@ static long parse_cmd(const uint8_t* p, size_t n, bool in_dl) {
 // with CP control bit 5 that raises the CP interrupt (GXSetBreakPtCallback). Games that pipeline
 // frames with breakpoints (Geometry Wars: Galaxies) rely on the GP holding there.
 #include <deque>
+#include <functional>
 #include <array>
 struct Burst { uint32_t addr, next; std::array<uint8_t, 32> b; };
 static std::deque<Burst> g_bursts;
@@ -189,8 +190,26 @@ static bool bp_stalled() {
     return (g_rptr & 0x1FFFFFE0u) == bp;
 }
 
+// FIFO watermarks (linked mode): when the CPU gets too far ahead of a stalled GP, the CP raises the
+// overflow interrupt and the SDK suspends the writing thread until the underflow interrupt.
+static void cp_watermarks() {
+    uint32_t ctl = mmio_peek(0xCC000002u);
+    uint32_t hi = (mmio_peek(0xCC00002Au) & 0x3FFF) << 16 | (mmio_peek(0xCC000028u) & 0xFFFF);
+    uint32_t lo = (mmio_peek(0xCC00002Eu) & 0x3FFF) << 16 | (mmio_peek(0xCC00002Cu) & 0xFFFF);
+    uint32_t dist = (uint32_t)g_bursts.size() * 32;
+    bool linked = ctl & 0x10;
+    uint32_t st = mmio_peek(0xCC000000u) & ~3u;
+    if (linked && hi && dist > hi) st |= 1;                    // overflow (above high watermark)
+    if (dist < lo) st |= 2;                                    // underflow (below low watermark)
+    mmio_poke(0xCC000000u, st);
+    (void)ctl;
+}
+
+static bool gp_reading() { return mmio_peek(0xCC000002u) & 1; }   // CP control bit 0: GP reads the FIFO
+
 static void gp_run() {
     for (;;) {
+        if (!gp_reading()) return;                             // GXEnableBreakPt turns reads off while it moves the breakpoint
         if (bp_stalled()) {
             mmio_poke(0xCC000000u, mmio_peek(0xCC000000u) | 0x10);   // CP status: breakpoint
             if (!g_bp_latched && (mmio_peek(0xCC000002u) & 0x20)) {
@@ -229,6 +248,7 @@ void gx_fifo_reg_write(uint32_t a, uint32_t v) {
                     mmio_peek(0xCC00003Eu), mmio_peek(0xCC00003Cu), g_rptr, g_bursts.size(), mmio_peek(0xCC003014u), mmio_peek(0xCC00300Cu), mmio_peek(0xCC003010u));
         if (a != 0xCC000002u) g_bp_latched = false;
         gp_run();
+        cp_watermarks();
     }
 }
 
@@ -254,7 +274,7 @@ void fifo_write(uint32_t v, int size) {
         memcpy(bu.b.data(), g_part, 32);
         memcpy(MEM + (0x80000000u | bu.addr), g_part, 32);     // the burst lands in the FIFO buffer in memory
         if (!(mmio_peek(0xCC000002u) & 0x10)) continue;        // GP link off (GXBeginDisplayList): memory only
-        if (g_bursts.empty() && !bp_stalled() && bu.addr == g_rptr) {   // fast path: GP idle and caught up
+        if (g_bursts.empty() && gp_reading() && !bp_stalled() && bu.addr == g_rptr) {   // fast path: GP idle and caught up
             g_rptr = bu.next;
             gp_parse(bu.b.data(), 32);
             gp_run();
@@ -262,6 +282,14 @@ void fifo_write(uint32_t v, int size) {
             if (g_bursts.empty() && bu.addr != g_rptr && !bp_stalled()) g_rptr = bu.addr;
             g_bursts.push_back(bu);
             gp_run();
+            cp_watermarks();
+            if (mmio_peek(0xCC000000u) & 1) {
+                // FIFO overflow: on hardware the CP interrupt suspends the writing thread until the GP
+                // drains to the low watermark. Do the same by taking interrupts here (the breakpoint
+                // that holds the GP is released from the VI callbacks).
+                extern bool wait_with_interrupts(const std::function<bool()>&, int);
+                wait_with_interrupts([] { cp_watermarks(); return (mmio_peek(0xCC000000u) & 2) != 0; }, 2000);
+            }
         }
     }
 }

@@ -30,6 +30,7 @@ struct HThread {
     std::thread th;
 };
 static thread_local HThread* t_self = nullptr;
+thread_local Ctx* t_cur_ctx = nullptr;   // the guest CPU context running on this host thread
 static thread_local std::unique_lock<std::mutex>* t_lock = nullptr;
 static std::unordered_map<uint32_t, HThread*> g_owner;   // guest OSContext -> host thread
 static thread_local bool t_in_irq = false;
@@ -41,7 +42,7 @@ void threads_init_main(Ctx* c) {
     static std::unique_lock<std::mutex> lk(g_big);
     t_self = &main_ht;
     t_lock = &lk;
-    (void)c;
+    t_cur_ctx = c;
 }
 
 // ---------------------------------------------------------------- context layout
@@ -90,6 +91,7 @@ static void thread_main(HThread* ht, uint32_t entry) {
     t_lock = &lk;
     while (!ht->go) ht->cv.wait(lk);
     Ctx* c = &ht->ctx;
+    t_cur_ctx = c;
     dispatch(c, entry);
     // returning from the thread function == OSExitThread(retval)
     extern void G_FN_OS_EXIT_THREAD(Ctx*);
@@ -194,6 +196,19 @@ void irq_check(Ctx* c) {
     }
     t_irq_ctx = saved_irq_ctx;
     t_in_irq = false;
+}
+
+// Block the guest CPU (still taking interrupts) until cond() holds or timeout; used when the
+// CPU would overrun a stalled GP's FIFO (the SDK's FIFO overflow interrupt suspends the writer).
+// Returns false when interrupts can't be taken here (disabled, or already inside a handler).
+bool wait_with_interrupts(const std::function<bool()>& cond, int max_ms) {
+    Ctx* c = t_cur_ctx;
+    if (!c || t_in_irq || !(c->msr & 0x8000)) return false;
+    auto end = std::chrono::steady_clock::now() + std::chrono::milliseconds(max_ms);
+    while (!cond() && std::chrono::steady_clock::now() < end) {
+        if (g_irq_pending.load()) irq_check(c); else idle_wait();
+    }
+    return true;
 }
 
 void thread_status() {
