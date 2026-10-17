@@ -1,0 +1,17 @@
+game/
+orig/
+refs/
+build_dtk/
+src/gen/
+src/build*/
+src/main.dol
+src/shots/
+src/*.log
+src/*.wav
+src/*.png
+src/*.txt.bak
+src/presses*.txt
+src/prof.txt
+src/__pycache__/
+tools/__pycache__/
+nand/

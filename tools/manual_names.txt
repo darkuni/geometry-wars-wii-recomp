@@ -1,0 +1,29 @@
+# address name  (applied by tools/apply_manual.py to config/symbols.txt)
+800B1384 AIStopDMA
+800B1398 AIGetDMABytesLeft
+800E4898 SCGetAspectRatio
+800E49C0 SCGetLanguage
+800A0DE8 SelectThread
+800B342C __AXDSPResumeCallback
+800BC154 GXDisableBreakPt
+800BC0B4 GXEnableBreakPt
+800BC070 GXSetBreakPtCallback
+800BC04C GXGetFifoPtrs
+# game: frame pipelining (GX breakpoint per finished frame, 5-entry queue)
+80015E14 GW_PresentThread
+80015EB0 GW_BreakPtCallback
+800160F0 GW_PreRetraceCallback
+80016158 GW_PostRetraceCallback
+80016360 GW_InitFramePipe
+80016710 GW_EndFrame
+8001D4F0 GW_MainLoop
+800BD2E0 GXSetDrawSync
+800BD394 GXReadDrawSync
+800BBFB8 GXGetCPUFifo
+800BBEB0 __GXSaveCPUFifo
+800BCF38 GXFlush
+80052A64 GW_ReadPadWPAD
+80052D30 GW_UpdatePads
+8001F8D4 GW_ReadPadKPAD
+8001EC0C GW_InputUpdate
+80018564 GW_ProbePads
