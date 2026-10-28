@@ -70,7 +70,8 @@ static void bp_write(uint32_t v) {
         mmio_poke(0xCC00100Eu, tok);
         static bool cplog = getenv("CPLOG") != nullptr;
         extern uint64_t g_vi_count;
-        if (cplog) fprintf(g_log, "[cp] token %04X (reg %02X) VI %llu\n", tok, reg, (unsigned long long)g_vi_count);
+        if (cplog) fprintf(g_log, "[cp] token %04X (reg %02X) VI %llu tev %06X %06X %06X %06X\n", tok, reg, (unsigned long long)g_vi_count,
+                           g_gx.bp[0xE0], g_gx.bp[0xE1], g_gx.bp[0xE2], g_gx.bp[0xE3]);
         g_gx.stats.tokens++;
         if (reg == 0x47)
             post_irq([](Ctx* c) {
@@ -292,4 +293,15 @@ void fifo_write(uint32_t v, int size) {
             }
         }
     }
+}
+
+// State for the hang report (runtime.cpp watchdog).
+void gx_fifo_dump(FILE* f) {
+    fprintf(f, "[fifo] GP at %08X, %zu bursts pending, %d bytes in pipe, bp %04X%04X latched %d, stalled %d, reading %d\n",
+            g_rptr, g_bursts.size(), g_partn, mmio_peek(0xCC00003Eu), mmio_peek(0xCC00003Cu), (int)g_bp_latched,
+            (int)bp_stalled(), (int)gp_reading());
+    fprintf(f, "[fifo] CP status %04X control %04X, PI base %08X end %08X wptr %08X, token %04X\n",
+            mmio_peek(0xCC000000u), mmio_peek(0xCC000002u), mmio_peek(0xCC00300Cu), mmio_peek(0xCC003010u),
+            mmio_peek(0xCC003014u), mmio_peek(0xCC00100Eu));
+    if (!g_bursts.empty()) fprintf(f, "[fifo] first pending burst %08X, last %08X\n", g_bursts.front().addr, g_bursts.back().addr);
 }

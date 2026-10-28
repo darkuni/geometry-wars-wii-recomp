@@ -877,6 +877,8 @@ static void efb_copy_impl(uint32_t val) {
         if (g_cfg.resolution_scale != RS || std::max(1, g_cfg.msaa) != g_cfg_msaa_seen) { g_cfg_msaa_seen = g_cfg.msaa; resize_efb(g_cfg.resolution_scale); }
         glBindFramebuffer(GL_FRAMEBUFFER, g_fbo);
     } else {
+        static bool notex = getenv("NO_TEXCOPY") != nullptr;   // test runs: skip texture copies (fast, wrong)
+        if (notex) return;
         int tw = half ? w / 2 : w, th = half ? h / 2 : h;
         {
             static bool flog = getenv("FRAMELOG") != nullptr;
@@ -952,6 +954,7 @@ static bool g_batch_open = false;
 
 void gx_flush() {
     if (g_batch.empty()) { g_batch_open = false; return; }
+    gl_platform_make_current();
     glBindVertexArray(g_vao);
     glBindBuffer(GL_ARRAY_BUFFER, g_vbo);
     glBufferData(GL_ARRAY_BUFFER, g_batch.size() * sizeof(Vtx), g_batch.data(), GL_STREAM_DRAW);

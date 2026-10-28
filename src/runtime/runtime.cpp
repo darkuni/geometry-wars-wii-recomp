@@ -1,3 +1,6 @@
+#include <cerrno>
+#include <cstring>
+#include <thread>
 // Host runtime for the recompiled main.dol
 #include "ppc.h"
 #include "table.h"
@@ -333,6 +336,45 @@ static void guest_threads_dump() {
         fprintf(LOG, "\n");
     }
 }
+// Hang watchdog: if no frame reaches the screen for 8 s, write a report next to the executable
+// (and to the log) so a freeze on someone else's machine can be diagnosed.
+static std::string g_exe_dir;
+static void hang_watchdog() {
+    extern uint64_t gx_frame_count();
+    extern uint64_t g_vi_count;
+    uint64_t last = gx_frame_count(), lastvi = g_vi_count;
+    int still = 0, reports = 0;
+    for (;;) {
+        std::this_thread::sleep_for(std::chrono::seconds(1));
+        uint64_t f = gx_frame_count();
+        static int tick = 0;
+        if (++tick % 10 == 0) {   // status line every 10 s (in the log file)
+            fprintf(LOG, "[status] %d s: frame %llu, VI %llu\n", tick, (unsigned long long)f, (unsigned long long)g_vi_count);
+            if (tick % 30 == 0) { guest_threads_dump(); extern void gx_fifo_dump(FILE*); gx_fifo_dump(LOG); }
+            fflush(LOG);
+        }
+        if (f != last || f == 0) { last = f; still = 0; continue; }
+        if (++still != 8 || reports >= 3) continue;
+        reports++;
+        std::string path = g_exe_dir + "geowars_hang.txt";
+        FILE* o = fopen(path.c_str(), reports == 1 ? "w" : "a");
+        for (FILE* out : {o, LOG}) {
+            if (!out) continue;
+            fprintf(out, "=== no new frame for 8 s (frame %llu, VI %llu, VI advanced %llu since) ===\n",
+                    (unsigned long long)f, (unsigned long long)g_vi_count, (unsigned long long)(g_vi_count - lastvi));
+            FILE* save = g_log; g_log = out;
+            extern void thread_status(); thread_status();
+            guest_threads_dump();
+            extern void gx_fifo_dump(FILE*); gx_fifo_dump(out);
+            dump_ring();
+            g_log = save;
+            fflush(out);
+        }
+        if (o) fclose(o);
+        lastvi = g_vi_count;
+    }
+}
+
 static void on_signal(int sig) {
 #ifndef _WIN32
     if (getenv("PROFILE")) prof_dump();
@@ -447,6 +489,24 @@ int main(int argc, char** argv) {
         }
     }
     const char* root = rootstr.c_str();
+#ifdef _WIN32
+    {   // log to geowars.log next to the exe (the console only gets the config line)
+        std::string lp = exedir + GAME_EXE ".log";
+        FILE* lf = fopen(lp.c_str(), "w");
+        if (!lf) {
+            fprintf(stderr, "cannot write %s (errno %d: %s)\n", lp.c_str(), errno, strerror(errno));
+            const char* tmp = getenv("TEMP");
+            if (tmp) { lp = std::string(tmp) + "\\" GAME_EXE ".log"; lf = fopen(lp.c_str(), "w"); }
+        }
+        if (lf) { setvbuf(lf, nullptr, _IOLBF, 4096); g_log = lf; fprintf(stderr, "log: %s\n", lp.c_str()); }
+    }
+    {   // a click in the console window (QuickEdit selection) would block every log write and freeze the game
+        HANDLE in = GetStdHandle(STD_INPUT_HANDLE);
+        DWORD mode = 0;
+        if (in != INVALID_HANDLE_VALUE && GetConsoleMode(in, &mode))
+            SetConsoleMode(in, (mode & ~ENABLE_QUICK_EDIT_MODE) | ENABLE_EXTENDED_FLAGS);
+    }
+#endif
     T0 = std::chrono::steady_clock::now();
     config_load(exe.c_str());
     reserve_guest();
@@ -476,6 +536,8 @@ int main(int argc, char** argv) {
 #endif
     threads_init_main(&ctx);
     extern void devices_start(); devices_start();
+    g_exe_dir = exedir;
+    std::thread(hang_watchdog).detach();
     fprintf(LOG, "entry %08X\n", entry);
     dispatch(&ctx, entry);
     fprintf(LOG, "__start returned\n");

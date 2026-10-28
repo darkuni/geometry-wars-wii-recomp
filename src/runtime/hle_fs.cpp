@@ -184,7 +184,7 @@ int32_t fs_ioctlv(uint32_t cmd, uint32_t nin, uint32_t nio, uint32_t vec) {
         if (!fs::exists(hp, ec)) return FS_ENOENT;
         uint32_t blocks = 0, inodes = 1;
         if (fs::is_directory(hp, ec)) {
-            for (auto it = fs::recursive_directory_iterator(hp, ec); it != fs::recursive_directory_iterator(); it.increment(ec)) {
+            for (auto it = fs::recursive_directory_iterator(hp, ec); !ec && it != fs::recursive_directory_iterator(); it.increment(ec)) {
                 inodes++;
                 if (it->is_regular_file(ec)) blocks += (uint32_t)((it->file_size(ec) + 0x3FFF) / 0x4000);
             }

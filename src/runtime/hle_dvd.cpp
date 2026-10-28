@@ -70,7 +70,8 @@ static bool dvd_read(uint32_t dst, uint32_t len, uint64_t off) {
     fclose(f);
     memcpy(MEM + (dst & 0x9FFFFFFFu), buf.data(), len);
     static int logged = 0;
-    if (logged++ < 200) fprintf(g_log, "[dvd] read %s +%llX len %X -> %08X%s\n", it->path.c_str(), (unsigned long long)(off - it->off), len, dst, got < len ? " (short)" : "");
+    static const int lim = getenv("DVDLOG") ? 1 << 30 : 200;
+    if (logged++ < lim) fprintf(g_log, "[dvd] read %s +%llX len %X -> %08X%s\n", it->path.c_str(), (unsigned long long)(off - it->off), len, dst, got < len ? " (short)" : "");
     return true;
 }
 
@@ -95,8 +96,10 @@ int32_t di_ioctl(uint32_t cmd, uint32_t in, uint32_t inlen, uint32_t out, uint32
         case 0xE0:   // RequestError
             if (outlen >= 4) W32(out, 0);
             return 1;
-        default:
-            fprintf(g_log, "[dvd] di cmd %02X (cmd %X) -> OK\n", op, cmd);
+        default: {
+            static int n = 0;
+            if (n++ < 20) fprintf(g_log, "[dvd] di cmd %02X (cmd %X) -> OK\n", op, cmd);
+        }
             return 1;
     }
 }
