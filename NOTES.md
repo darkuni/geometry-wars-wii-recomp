@@ -41,3 +41,15 @@ since Chocobo, so the runtime gained a disc mode next to the WiiWare title mode.
 - Headless (llvmpipe) runs at ~8 fps: the glow effect does ~21 EFB copies per frame. Use RESOLUTION_SCALE=1 and
   long AUTOPRESS windows (A@200-240,...) because the game samples input once per rendered frame.
 - Debug env: CPLOG=1 (CP control/breakpoint/token log), TRACEFN=addr,... (log every call of named functions).
+
+## Windows: window thread and GL context
+- With GX breakpoints, GP work (and so GL calls and frame presentation) runs on whichever guest thread takes the
+  interrupt that releases the breakpoint, not only on the thread that created the window. On Windows the GL context
+  was current only on the creating thread and window messages were only pumped from there, so the screen froze on a
+  dark frame and the window went "Not Responding" while the game kept running underneath.
+- Fix: the SDL window, both GL contexts and the event pump live on a dedicated UI thread; the renderer context is
+  released on every guest thread switch (`switch_to` -> `gl_platform_release`) and made current by the thread
+  doing GX work (`gl_platform_make_current` in `ensure_gl`/`gx_flush`).
+- First boot takes ~35 s at 60 fps before the save check; closing earlier looked like a hang.
+- Diagnostics: `geowars.log` next to the exe (falls back to %TEMP%), `[status]` line every 10 s, thread/FIFO dump
+  every 30 s, `geowars_hang.txt` after 8 s without a new frame.

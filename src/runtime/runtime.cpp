@@ -1,3 +1,4 @@
+#include <atomic>
 #include <cerrno>
 #include <cstring>
 #include <thread>
@@ -349,7 +350,12 @@ static void hang_watchdog() {
         uint64_t f = gx_frame_count();
         static int tick = 0;
         if (++tick % 10 == 0) {   // status line every 10 s (in the log file)
+#ifdef _WIN32
+            extern std::atomic<unsigned long> g_ui_polls;
+            fprintf(LOG, "[status] %d s: frame %llu, VI %llu, ui polls %lu\n", tick, (unsigned long long)f, (unsigned long long)g_vi_count, g_ui_polls.load());
+#else
             fprintf(LOG, "[status] %d s: frame %llu, VI %llu\n", tick, (unsigned long long)f, (unsigned long long)g_vi_count);
+#endif
             if (tick % 30 == 0) { guest_threads_dump(); extern void gx_fifo_dump(FILE*); gx_fifo_dump(LOG); }
             fflush(LOG);
         }

@@ -9,9 +9,10 @@ build turns the image into a `game` folder and generates the C++ from the execut
 
 ## Status
 
-- Boots through the strap screen, licence/ESRB/publisher screens, title, profile creation, galaxy map,
-  drone select and gameplay (headless Linux test build, scripted input).
-- Windows build produced, not yet play-tested on Windows. Audio not verified by ear.
+- Plays through the strap screen, licence/ESRB/publisher screens, title, profile creation, galaxy map,
+  drone select, levels and results (Linux headless tests and Windows play-testing).
+- First start takes about 35 s to get through the intro screens before the save is created.
+- `geowars.log` is written next to the exe; a freeze report (`geowars_hang.txt`) if no frame is shown for 8 s.
 - Not supported: online leaderboards (DWC/SO), DS download play (MP/MPDL), Wii Remote pointer aiming.
 
 Shares its recompiler and runtime with the ReBirth ports and Chocobo's Dungeon; per-game addresses are in
@@ -22,7 +23,7 @@ Shares its recompiler and runtime with the ReBirth ports and Chocobo's Dungeon; 
 Default is the Classic Controller layout (`controls = classic` in `geowars.ini`), which is a twin-stick
 setup on a PC gamepad: left stick moves, right stick fires, LT/RT (ZL/ZR) or L/R for bombs as the game
 assigns them, Start = +, Back = -, Guide = HOME.
-Keyboard: arrows move, I/J/K/L fire, X = A, Z = B, S = X, A = Y, Q/W = L/R, 1/2 = ZL/ZR, Enter = +.
+Keyboard: arrows move, I/J/K/L fire, X = A, Z = B, A = X, S = Y, Q/W = L/R, 1/2 = ZL/ZR, Enter = +.
 `controls = nunchuk` gives the Wii Remote + Nunchuk layout (no pointer, so aiming is limited).
 
 ## Layout

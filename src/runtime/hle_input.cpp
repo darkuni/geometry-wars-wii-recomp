@@ -10,7 +10,7 @@
 //             Keyboard: X = A, Z = B, Shift(L2) = Z, C(R1) = C, I/J/K/L = d-pad.
 //   classic:  Classic Controller (the game reads it as WPAD_DEV_CLASSIC). Buttons by label:
 //             Gamepad A/B/X/Y = A/B/X/Y, LB/RB = L/R, LT/RT = ZL/ZR, both sticks, d-pad.
-//             Keyboard: arrows = d-pad, X = A, Z = B, S = X, A = Y, Q/W = L/R, 1/2 = ZL/ZR,
+//             Keyboard: arrows = d-pad, X = A, Z = B, A = X, S = Y, Q/W = L/R, 1/2 = ZL/ZR,
 //             I/J/K/L = right stick.
 //   Both: Start/Enter = +, Back/Backspace = -, Guide/H = HOME.
 #include "hle.h"

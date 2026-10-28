@@ -45,7 +45,8 @@ static thread_local bool t_current = false;
 // delivers them only to the thread that created the window). The renderer's GL context is
 // made current by whichever emulation thread does GX work and released when that thread
 // hands the emulated CPU to another one.
-static std::atomic<int> g_ui_state{0};   // 0 starting, 1 ready, -1 failed
+static std::atomic<int> g_ui_state{0};
+std::atomic<unsigned long> g_ui_polls{0};   // UI thread heartbeat (status line)   // 0 starting, 1 ready, -1 failed
 static bool ui_create() {
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_GAMECONTROLLER | SDL_INIT_EVENTS) != 0) {
         fprintf(stderr, "[sdl] init failed: %s\n", SDL_GetError());
@@ -92,7 +93,11 @@ static void ui_thread() {
     std::thread(present_thread).detach();
     g_ui_state = 1;
     for (;;) {
+        Uint64 t0 = SDL_GetTicks64();
         ui_poll();
+        Uint64 dt = SDL_GetTicks64() - t0;
+        g_ui_polls++;
+        if (dt > 500) fprintf(stderr, "[ui] event pump took %llu ms\n", (unsigned long long)dt);
         SDL_Delay(2);
     }
 }
