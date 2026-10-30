@@ -4,11 +4,9 @@ https://github.com/darkuni/geometry-wars-wii-recomp
 No game data is included. You need your own Geometry Wars: Galaxies disc image (Wii, NTSC-U, RGLE7D)
 as .iso or .ciso.
 
-Setup (once)
-  1. Install Python 3.11 or newer from python.org (tick "Add python.exe to PATH").
-  2. Drag your disc image onto make-game-folder.bat (or put it in this folder and double-click the .bat).
-     It creates the "game" folder; the image isn't needed after that.
-  3. Run geowars.exe. The first start takes about 35 seconds to get through the intro screens.
+Setup
+  Put your disc image (.iso or .ciso) in this folder and run geowars.exe. On the first start it builds the "game"
+  folder from it (up to a minute); after that the disc image isn't needed any more.
 
 Requirements: 64-bit Windows 10/11, a GPU with OpenGL 3.3.
 

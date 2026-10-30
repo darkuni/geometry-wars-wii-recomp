@@ -9,8 +9,8 @@ the Wii hardware, IOS and the DSP.
 ## Download
 
 Get the latest `GeometryWarsGalaxies-<version>-win64.zip` from
-[Releases](https://github.com/darkuni/geometry-wars-wii-recomp/releases), unzip it, drag your disc image onto
-`make-game-folder.bat` (needs [Python 3.11+](https://www.python.org/downloads/)) and run `geowars.exe`.
+[Releases](https://github.com/darkuni/geometry-wars-wii-recomp/releases), unzip it, put your disc image (.iso or .ciso) in the same folder and run `geowars.exe`: the first start builds the
+`game` folder from it. Nothing else to install.
 The zip's `README.txt` has the controls and keys. To build it yourself, see [Building](#building).
 
 ## Status
@@ -19,6 +19,8 @@ The zip's `README.txt` has the controls and keys. To build it yourself, see [Bui
   drone select, levels and results (Linux headless tests and Windows play-testing).
 - First start takes about 35 s to get through the intro screens before the save is created.
 - `geowars.log` is written next to the exe; a freeze report (`geowars_hang.txt`) if no frame is shown for 8 s.
+- v0.4 (Oct 30, 2026): no Python or setup tool needed - on the first start the game builds its `game` folder
+  from your disc image placed next to the exe (decryption and unpacking are built in).
 - v0.3 (Oct 30, 2026): faster vertex handling (index buffers, cached vertex setup); audio sent to the sound
   card straight from the mixer (no clicks at 3 ms frame boundaries). The GX FIFO stays on the game thread
   (the game's frame pipeline relies on GX breakpoints the CPU must see immediately).
