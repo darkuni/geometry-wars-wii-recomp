@@ -1,3 +1,4 @@
+#include <mutex>
 #include <atomic>
 #include <cerrno>
 #include <cstring>
@@ -129,9 +130,12 @@ uint64_t fifo_bytes = 0;
 
 
 void raise_interrupt(Ctx* c, int n);
-void mmio_poke(uint32_t a, uint32_t v) { mmio_regs[a] = v; }
-uint32_t mmio_peek(uint32_t a) { return mmio_regs.count(a) ? mmio_regs[a] : 0; }
+// the GX thread pokes PE registers, so the register map is shared
+static std::recursive_mutex g_mmio_mx;
+void mmio_poke(uint32_t a, uint32_t v) { std::lock_guard<std::recursive_mutex> g(g_mmio_mx); mmio_regs[a] = v; }
+uint32_t mmio_peek(uint32_t a) { std::lock_guard<std::recursive_mutex> g(g_mmio_mx); return mmio_regs.count(a) ? mmio_regs[a] : 0; }
 uint32_t mmio_read(uint32_t a, int size) {
+    std::lock_guard<std::recursive_mutex> g(g_mmio_mx);
     auto& s = mmio_stats[a];
     if (verbose_mmio && s.reads < 4) fprintf(LOG, "[mmio] R%d %08X\n", size * 8, a);
     s.reads++;
@@ -143,6 +147,7 @@ uint32_t mmio_read(uint32_t a, int size) {
 }
 void mmio_write(uint32_t a, uint32_t v, int size) {
     if ((a & 0xFFFFFFF0u) == 0xCC008000u) { fifo_write(v, size); return; }
+    std::lock_guard<std::recursive_mutex> g(g_mmio_mx);
     auto& s = mmio_stats[a];
     if (verbose_mmio && s.writes < 4) fprintf(LOG, "[mmio] W%d %08X = %08X\n", size * 8, a, v);
     s.writes++;

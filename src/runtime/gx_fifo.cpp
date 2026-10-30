@@ -4,6 +4,7 @@
 #include "hle.h"
 #include "gx_state.h"
 #include "gx_render.h"
+void gx_cp_written();
 #include <vector>
 
 GXState g_gx;
@@ -113,7 +114,7 @@ static long parse_cmd(const uint8_t* p, size_t n, bool in_dl) {
         case 0x00: return 1;                                   // NOP
         case 0x08:                                             // load CP
             if (n < 6) return 0;
-            g_gx.cp[p[1]] = rd32(p + 2);
+            g_gx.cp[p[1]] = rd32(p + 2); gx_cp_written();
             return 6;
         case 0x10: {                                           // load XF
             if (n < 5) return 0;

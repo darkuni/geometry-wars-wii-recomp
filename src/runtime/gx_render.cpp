@@ -246,8 +246,15 @@ struct DrawSetup {
     LightP lights[8];
 };
 static DrawSetup g_ds;
+// The setup only changes when CP registers, XF registers or XF light memory are written
+// (gx_xf_write / gx_cp_written), or the draw uses another VAT.
+static bool g_vtx_dirty = true;
+static int g_vtx_vat = -1;
+void gx_cp_written() { g_vtx_dirty = true; }
 
 static void setup_vertex_pipeline(int vat) {
+    if (!g_vtx_dirty && vat == g_vtx_vat) return;
+    g_vtx_dirty = false; g_vtx_vat = vat;
     DrawSetup& d = g_ds;
     const uint32_t lo = g_gx.cp[0x50], hi = g_gx.cp[0x60];
     const uint32_t A = g_gx.cp[0x70 + vat], B = g_gx.cp[0x80 + vat], C = g_gx.cp[0x90 + vat];
@@ -678,8 +685,8 @@ static void apply_state() {
 void gx_xf_write(uint32_t addr, uint32_t val) {
     static long fd = getenv("FRAMEDUMP") ? atol(getenv("FRAMEDUMP")) : -1;
     if ((long)g_frame == fd && addr < 0x0C) fprintf(g_log, "[xf] %03X = %08X (%f)\n", addr, val, u2f(val));
-    if (addr < 0x1000) g_gx.xf_mem[addr] = val;
-    else if (addr < 0x1100) g_gx.xf_reg[addr - 0x1000] = val;
+    if (addr < 0x1000) { g_gx.xf_mem[addr] = val; if (addr >= 0x600) g_vtx_dirty = true; }
+    else if (addr < 0x1100) { g_gx.xf_reg[addr - 0x1000] = val; g_vtx_dirty = true; }
 }
 void gx_xf_indexed(uint8_t op, uint32_t arg) {
     static long fd = getenv("FRAMEDUMP") ? atol(getenv("FRAMEDUMP")) : -1;
@@ -949,17 +956,24 @@ void gx_bp_hook(uint32_t reg, uint32_t val) {
 // Draws are batched: transformed triangles accumulate in g_batch while the pixel
 // pipeline state (BP registers) is unchanged, and go to GL as one draw call.
 // Vertex transform runs on the CPU, so XF/CP changes never break a batch.
+// Vertices are stored once each and the triangles as indices (quads and strips share vertices).
 static std::vector<Vtx> g_batch;
+static std::vector<uint32_t> g_bidx;
 static bool g_batch_open = false;
+static GLuint g_ibo = 0;
 
 void gx_flush() {
-    if (g_batch.empty()) { g_batch_open = false; return; }
+    if (g_bidx.empty()) { g_batch.clear(); g_batch_open = false; return; }
     gl_platform_make_current();
     glBindVertexArray(g_vao);
     glBindBuffer(GL_ARRAY_BUFFER, g_vbo);
     glBufferData(GL_ARRAY_BUFFER, g_batch.size() * sizeof(Vtx), g_batch.data(), GL_STREAM_DRAW);
-    glDrawArrays(GL_TRIANGLES, 0, (GLsizei)g_batch.size());
+    if (!g_ibo) glGenBuffers(1, &g_ibo);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, g_ibo);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, g_bidx.size() * 4, g_bidx.data(), GL_STREAM_DRAW);
+    glDrawElements(GL_TRIANGLES, (GLsizei)g_bidx.size(), GL_UNSIGNED_INT, nullptr);
     g_batch.clear();
+    g_bidx.clear();
     g_batch_open = false;
     g_batches++;
 }
@@ -1009,8 +1023,8 @@ void gx_draw(uint8_t prim, int vat, uint32_t count, const uint8_t* data, int vsi
     verts.resize(count);
     setup_vertex_pipeline(vat);
     const uint8_t* p = data;
+    RawVtx r;   // fields the format doesn't carry keep their defaults for the whole draw
     for (uint32_t i = 0; i < count; i++) {
-        RawVtx r;
         const uint8_t* start = p;
         decode_vertex(p, r);
         p = start + vsize;
@@ -1086,25 +1100,27 @@ void gx_draw(uint8_t prim, int vat, uint32_t count, const uint8_t* data, int vsi
         fprintf(g_log, "| reg0 %.2f %.2f %.2f %.2f k0 %.2f %.2f %.2f %.2f c0 %.2f %.2f %.2f %.2f x %.3f y %.3f z %.3f w %.3f vp %.1f %.1f %.1f %.1f proj %.3f %.3f %.3f %.3f %.3f %.3f t%u\n", g_tevreg[0][0], g_tevreg[0][1], g_tevreg[0][2], g_tevreg[0][3],
                 g_konst[0][0], g_konst[0][1], g_konst[0][2], g_konst[0][3], verts[0].c0[0], verts[0].c0[1], verts[0].c0[2], verts[0].c0[3], verts[0].pos[0], verts[0].pos[1], verts[0].pos[2], verts[0].pos[3], xff(0x101A), xff(0x101B), xff(0x101D), xff(0x101E), xff(0x1020), xff(0x1021), xff(0x1022), xff(0x1023), xff(0x1024), xff(0x1025), g_gx.xf_reg[0x26]);
     }
-    // append as a triangle list (winding preserved)
-    std::vector<Vtx>& b = g_batch;
+    // append: vertices once, triangles as indices (winding preserved)
+    const uint32_t base = (uint32_t)g_batch.size();
+    g_batch.insert(g_batch.end(), verts.begin(), verts.begin() + count);
+    std::vector<uint32_t>& b = g_bidx;
     switch (prim) {
         case 0x80:   // quads
             for (uint32_t i = 0; i + 3 < count; i += 4) {
-                b.push_back(verts[i]); b.push_back(verts[i + 1]); b.push_back(verts[i + 2]);
-                b.push_back(verts[i]); b.push_back(verts[i + 2]); b.push_back(verts[i + 3]);
+                uint32_t v = base + i;
+                b.insert(b.end(), {v, v + 1, v + 2, v, v + 2, v + 3});
             }
             break;
-        case 0x90: b.insert(b.end(), verts.begin(), verts.begin() + count / 3 * 3); break;
+        case 0x90: for (uint32_t i = 0; i < count / 3 * 3; i++) b.push_back(base + i); break;
         case 0x98:   // strip
             for (uint32_t i = 0; i + 2 < count; i++) {
-                if (i & 1) { b.push_back(verts[i + 1]); b.push_back(verts[i]); }
-                else { b.push_back(verts[i]); b.push_back(verts[i + 1]); }
-                b.push_back(verts[i + 2]);
+                uint32_t v = base + i;
+                if (i & 1) b.insert(b.end(), {v + 1, v, v + 2});
+                else b.insert(b.end(), {v, v + 1, v + 2});
             }
             break;
         case 0xA0:   // fan
-            for (uint32_t i = 1; i + 1 < count; i++) { b.push_back(verts[0]); b.push_back(verts[i]); b.push_back(verts[i + 1]); }
+            for (uint32_t i = 1; i + 1 < count; i++) b.insert(b.end(), {base, base + i, base + i + 1});
             break;
     }
     static bool nobatch = getenv("GX_NOBATCH") != nullptr;
