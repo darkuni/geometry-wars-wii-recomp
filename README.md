@@ -4,8 +4,14 @@ A static recompilation of **Geometry Wars: Galaxies** for Wii (disc, NTSC-U, `RG
 PowerPC executable is translated to C++ and runs on Windows (and Linux) with a small runtime that replaces
 the Wii hardware, IOS and the DSP.
 
-**No game data is included.** You need your own copy of the game as a disc image (`.iso` or `.ciso`). The
-build turns the image into a `game` folder and generates the C++ from the executable inside it.
+**No game data is included.** You need your own copy of the game as a disc image (`.iso` or `.ciso`).
+
+## Download
+
+Get the latest `GeometryWarsGalaxies-<version>-win64.zip` from
+[Releases](https://github.com/darkuni/geometry-wars-wii-recomp/releases), unzip it, drag your disc image onto
+`make-game-folder.bat` (needs [Python 3.11+](https://www.python.org/downloads/)) and run `geowars.exe`.
+The zip's `README.txt` has the controls and keys. To build it yourself, see [Building](#building).
 
 ## Status
 
@@ -13,6 +19,9 @@ build turns the image into a `game` folder and generates the C++ from the execut
   drone select, levels and results (Linux headless tests and Windows play-testing).
 - First start takes about 35 s to get through the intro screens before the save is created.
 - `geowars.log` is written next to the exe; a freeze report (`geowars_hang.txt`) if no frame is shown for 8 s.
+- v0.3 (Oct 30, 2026): faster vertex handling (index buffers, cached vertex setup); audio sent to the sound
+  card straight from the mixer (no clicks at 3 ms frame boundaries). The GX FIFO stays on the game thread
+  (the game's frame pipeline relies on GX breakpoints the CPU must see immediately).
 - Not supported: online leaderboards (DWC/SO), DS download play (MP/MPDL), Wii Remote pointer aiming.
 
 Shares its recompiler and runtime with the ReBirth ports and Chocobo's Dungeon; per-game addresses are in
@@ -25,6 +34,9 @@ setup on a PC gamepad: left stick moves, right stick fires, LT/RT (ZL/ZR) or L/R
 assigns them, Start = +, Back = -, Guide = HOME.
 Keyboard: arrows move, I/J/K/L fire, X = A, Z = B, A = X, S = Y, Q/W = L/R, 1/2 = ZL/ZR, Enter = +.
 `controls = nunchuk` gives the Wii Remote + Nunchuk layout (no pointer, so aiming is limited).
+
+F1 / Esc (or Start+Back) opens the settings menu, F11 / Alt+Enter toggles fullscreen, hold Tab (or click
+the right stick) to fast-forward. Saves go in a `nand` folder next to `game`.
 
 ## Layout
 
@@ -39,30 +51,58 @@ Keyboard: arrows move, I/J/K/L fire, X = A, Z = B, A = X, S = Y, Q/W = L/R, 1/2 
 
 ## Building
 
-Requirements: Python 3.11+, `pip install libWiiPy pycryptodome`, CMake, Ninja, a C++17 compiler; Windows builds
-are cross-compiled with mingw-w64 (posix threads) and the SDL2 mingw development package.
+The generated C++ is in `src/gen` (made with step 2 from the NTSC-U executable), so step 2 is only needed to
+regenerate it. GitHub Actions builds every push (see `.github/workflows/build-windows.yml`); version tags
+publish a release. Everything below is tested on Ubuntu 24.04; on Windows 10/11 use WSL
+(`wsl --install -d Ubuntu-24.04` in an administrator PowerShell, then open "Ubuntu"). The build cross-compiles
+a Windows exe.
+
+**1. Tools** (once)
 
 ```sh
-python3 tools/prepare_disc.py <your>.ciso game
-cd src
-python3 recomp.py ../game/sys/main.dol symbols.txt gen 300
-cmake -S . -B build-win -G Ninja -DCMAKE_TOOLCHAIN_FILE=mingw.cmake \
-      -DSDL2_DIR=/path/to/SDL2-2.30.x/x86_64-w64-mingw32
-ninja -C build-win -j1
-# Linux headless test build:
-cmake -S . -B build -G Ninja -DCMAKE_CXX_COMPILER=clang++ && ninja -C build
-SHOT_EVERY=100 SHOT_DIR=shots TIMEOUT=120 ./build/geowars ../game
+sudo apt update
+sudo apt install -y git wget python3 python3-pip cmake ninja-build mingw-w64 g++-mingw-w64-x86-64-posix
+pip install --break-system-packages libWiiPy pycryptodome
+wget https://github.com/libsdl-org/SDL/releases/download/release-2.30.9/SDL2-devel-2.30.9-mingw.tar.gz
+tar xf SDL2-devel-2.30.9-mingw.tar.gz          # -> ~/SDL2-2.30.9
 ```
 
-Ship `geowars.exe` with `SDL2.dll`, `libwinpthread-1.dll` and `src/runtime/ipl-font-licenses.txt` next to
-a `game` folder.
+**2. Extract your disc image (and optionally regenerate the C++)**
+
+```sh
+git clone https://github.com/darkuni/geometry-wars-wii-recomp.git
+cd geometry-wars-wii-recomp
+python3 tools/prepare_disc.py /mnt/c/path/to/gwgalaxieswii.ciso game     # your own image (Windows drives are under /mnt/c)
+cd src
+python3 recomp.py ../game/sys/main.dol symbols.txt gen 300               # optional: regenerates src/gen
+```
+
+**3. Build the Windows exe**
+
+```sh
+cmake -S . -B build-win -G Ninja -DCMAKE_TOOLCHAIN_FILE=mingw.cmake -DSDL2_DIR=$HOME/SDL2-2.30.9/x86_64-w64-mingw32
+ninja -C build-win -j1        # the generated code is large: -j1 keeps memory use down (raise it if you have RAM to spare)
+```
+
+**4. Put the game folder together** (example: `C:\Games\geowars`)
+
+```sh
+D=/mnt/c/Games/geowars; mkdir -p $D
+cp build-win/geowars.exe $HOME/SDL2-2.30.9/x86_64-w64-mingw32/bin/SDL2.dll \
+   /usr/x86_64-w64-mingw32/lib/libwinpthread-1.dll runtime/ipl-font-licenses.txt $D/
+cp -r ../game $D/
+```
+
+Linux test build (headless, EGL; writes screenshots): `cmake -S . -B build -G Ninja -DCMAKE_CXX_COMPILER=clang++ && ninja -C build`,
+then `SHOT_EVERY=100 SHOT_DIR=shots TIMEOUT=120 ./build/geowars ../game`.
 
 ## Disclaimer
 
 This is an unofficial fan project. It is **not affiliated with, endorsed by, or sponsored by** Activision,
 Bizarre Creations, Kuju Entertainment, Sierra or Nintendo. *Geometry Wars* and all related names and marks
-belong to their respective owners. This repository contains no game code or game data; you need your own
-legally obtained copy of the game.
+belong to their respective owners. This repository and its releases contain no game data (graphics, sound,
+levels): those come from your own legally obtained disc image. `src/gen` and the release exe contain code
+machine-translated from the game's executable.
 
 ## License
 

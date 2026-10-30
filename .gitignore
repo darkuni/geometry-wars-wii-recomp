@@ -2,7 +2,6 @@ game/
 orig/
 refs/
 build_dtk/
-src/gen/
 src/build*/
 src/main.dol
 src/shots/
