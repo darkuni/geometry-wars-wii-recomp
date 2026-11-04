@@ -37,6 +37,14 @@ since Chocobo, so the runtime gained a disc mode next to the WiiWare title mode.
   `hle_WPADRead` fills WPADCLStatus/WPADFSStatus; WPADInit is skipped, so WPADSet/GetDataFormat are kept on the host.
   Default controls = classic (twin-stick on a gamepad).
 
+- **Retrace pacing (issue #1, "cGraphicsWii.cpp:139: Queue overflow").** Each retrace callback moves a finished
+  frame to the present queue (5 entries) and wakes the present thread, which takes one frame per wakeup. After a
+  stall on the PC the VI thread used to deliver the missed retraces back to back, so the callbacks ran before the
+  present thread could, wakeups were lost and the queue crept up until it overflowed. Missed retraces are now
+  dropped and deliveries are at least half a period apart. Reproduced headless with stalls injected into the
+  retrace handler (present queue reached 3 of 5 within minutes; with the fix it stays at 1).
+- **Decrementer on Windows** uses the precise host sleep (condition-variable waits round up to the scheduler tick).
+
 ## Testing notes
 - Headless (llvmpipe) runs at ~8 fps: the glow effect does ~21 EFB copies per frame. Use RESOLUTION_SCALE=1 and
   long AUTOPRESS windows (A@200-240,...) because the game samples input once per rendered frame.

@@ -26,6 +26,13 @@ void raise_interrupt(Ctx* c, int n) {
 // returned kept the interrupt handler busy forever and starved the game.
 #include "config.h"
 #include "hostinput.h"
+// Retrace interrupts. Never deliver them back to back: after a stall (a slow frame, the PC busy) the
+// console would simply have missed those retraces, and games that queue frames per retrace (Geometry
+// Wars: Galaxies wakes its present thread from the retrace callback; a second callback before that
+// thread runs loses a wakeup, and after five the frame queue overflows) break if they all arrive at
+// once. So: skip retraces we fell behind on, and keep at least half a period between deliveries.
+static std::atomic<int64_t> vi_last_ns{0};
+static int64_t vi_now_ns() { return std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch()).count(); }
 static void vi_thread() {
     using clk = std::chrono::steady_clock;
     auto next = clk::now();
@@ -34,15 +41,19 @@ static void vi_thread() {
         int speed = std::max(1, std::min(8, g_cfg.speed));
         if (g_host_input.buttons & IN_TURBO) speed = std::min(8, std::max(4, speed * 2));
         double hz = env_hz > 0 ? env_hz : 59.94 * speed;
-        next += std::chrono::nanoseconds((long long)(1e9 / hz));
+        auto period = std::chrono::nanoseconds((long long)(1e9 / hz));
+        next += period;
         precise_sleep_until(next);
-        if (clk::now() - next > std::chrono::milliseconds(100)) next = clk::now();   // after a stall
+        if (clk::now() - next > period) next = clk::now();     // fell behind: drop the missed retraces
         if (vi_inflight.load()) continue;
+        int64_t gap = vi_now_ns() - vi_last_ns.load();
+        if (gap < period.count() / 2) precise_sleep_until(clk::now() + std::chrono::nanoseconds(period.count() / 2 - gap));
         vi_inflight.store(1);
         post_irq([](Ctx* c) {
             g_vi_count++;
             mmio_poke(0xCC002030u, 0x8000u | 0x1001u);   // DI0: retrace interrupt pending
             raise_interrupt(c, 24);                       // PI_VI
+            vi_last_ns.store(vi_now_ns());
             vi_inflight.store(0);
         });
     }
@@ -79,21 +90,29 @@ uint32_t dec_read() {
     int64_t rem = (int64_t)dec_deadline_ns - (int64_t)now_ns();
     return (uint32_t)(int32_t)(rem * 6075 / 100000);
 }
+// Waits use the precise host sleep (high-resolution timer + short spin on Windows): a condition
+// variable wait there rounds up to the scheduler tick, and games that poll with short
+// OSSleepTicks (TARGET: Terror's loader) then crawl. Sleep in slices of at most 1 ms so an
+// earlier deadline written meanwhile is still caught on time.
 static void dec_thread() {
     std::unique_lock<std::mutex> lk(dec_mx);
     for (;;) {
         if (!dec_deadline_ns) { dec_cv.wait(lk); continue; }
-        uint64_t gen = dec_gen;
-        auto when = dec_t0 + std::chrono::nanoseconds(dec_deadline_ns);
-        if (dec_cv.wait_until(lk, when) == std::cv_status::timeout && gen == dec_gen) {
-            dec_deadline_ns = 0;
+        uint64_t dl = dec_deadline_ns, now = now_ns();
+        if (now < dl) {
+            uint64_t slice = std::min<uint64_t>(dl - now, 1000000ull);
             lk.unlock();
-            post_irq([](Ctx* c) {
-                // DecrementerExceptionCallback(exception=8, context=current)
-                guest_call(c, G_DECREMENTER_CB, {8u, R32(0x800000D4u)});
-            });
+            precise_sleep_until(dec_t0 + std::chrono::nanoseconds(now + slice));
             lk.lock();
+            continue;
         }
+        dec_deadline_ns = 0;
+        lk.unlock();
+        post_irq([](Ctx* c) {
+            // DecrementerExceptionCallback(exception=8, context=current)
+            guest_call(c, G_DECREMENTER_CB, {8u, R32(0x800000D4u)});
+        });
+        lk.lock();
     }
 }
 void devices_start2() { std::thread(dec_thread).detach(); }
